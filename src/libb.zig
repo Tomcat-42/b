@@ -1,4 +1,4 @@
-pub const Tokenizer = @import("lib🅱️/Tokenizer.zig");
+pub const Tokenizer = @import("libb/Tokenizer.zig");
 
 test {
     const std = @import("std");
