@@ -11,7 +11,7 @@ const builtin = @import("builtin");
 pub fn build(bld: *std.Build) !void {
     const target = bld.standardTargetOptions(.{ .default_target = .{ .abi = .musl } });
     const optimize = bld.standardOptimizeOption(.{});
-    const manifest = try zon.parse.fromSlice(
+    const manifest = try zon.parse.fromSliceAlloc(
         struct { version: []const u8 },
         bld.allocator,
         @embedFile("build.zig.zon"),
@@ -52,17 +52,27 @@ pub fn build(bld: *std.Build) !void {
         .name = "b",
         .linkage = .static,
         .root_module = libb_mod,
+        .use_llvm = true,
     });
     const libb_check = bld.addLibrary(.{ .name = "libb", .root_module = libb_mod });
-    const libb_tests = bld.addTest(.{ .root_module = libb_mod });
+    const libb_tests = bld.addTest(.{
+        .name = "libbtest",
+        .root_module = libb_mod,
+        .use_llvm = true,
+    });
 
     const b = bld.addExecutable(.{
         .name = "b",
         .linkage = .static,
         .root_module = bcompiler_mod,
+        .use_llvm = true,
     });
     const b_check = bld.addLibrary(.{ .name = "b", .root_module = bcompiler_mod });
-    const b_tests = bld.addTest(.{ .root_module = bcompiler_mod });
+    const b_tests = bld.addTest(.{
+        .name = "btest",
+        .root_module = bcompiler_mod,
+        .use_llvm = true,
+    });
 
     // Install
     bld.installArtifact(libb);
@@ -89,8 +99,8 @@ pub fn build(bld: *std.Build) !void {
     clean_step.dependOn(&bld.addRemoveDirTree(bld.path(fs.path.basename(bld.install_path))).step);
     if (builtin.os.tag != .windows)
         clean_step.dependOn(&bld.addRemoveDirTree(bld.path(".zig-cache")).step);
-
     // Check Step
+
     const check_step = bld.step("check", "Check that the build artifacts are up-to-date");
     check_step.dependOn(&b_check.step);
     check_step.dependOn(&libb_check.step);
