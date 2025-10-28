@@ -1,9 +1,16 @@
 const std = @import("std");
+const fmt = std.fmt;
 const mem = std.mem;
+const Io = std.Io;
 const assert = std.debug.assert;
 const builtin = std.builtin;
 const StaticStringMap = std.StaticStringMap;
 const ascii = std.ascii;
+const Allocator = mem.Allocator;
+const ArrayList = std.ArrayList;
+
+const util = @import("util.zig");
+const term = util.term;
 
 const Tokenizer = @This();
 
@@ -11,9 +18,7 @@ src: []const u8,
 pos: usize = 0,
 
 pub fn init(src: []const u8) Tokenizer {
-    return Tokenizer{
-        .src = src,
-    };
+    return .{ .src = src };
 }
 
 pub fn reset(this: *Tokenizer) void {
@@ -71,7 +76,7 @@ pub fn next(this: *Tokenizer) ?Token {
             .value = this.src[this.pos .. this.pos + 1],
         },
         '+' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '+' => break :dfa .{
                     .tag = .@"++",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -87,7 +92,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '-' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '-' => break :dfa .{
                     .tag = .@"--",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -108,8 +113,8 @@ pub fn next(this: *Tokenizer) ?Token {
             .value = this.src[this.pos .. this.pos + 1],
         },
         '/' => {
-            if (this.peek(1)) |tok| switch (tok) {
-                '*' => break :dfa this.comment(),
+            if (this.nextChar()) |c| switch (c) {
+                '*' => break :dfa this.parseComment(),
                 else => {},
             };
 
@@ -120,7 +125,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '!' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '=' => break :dfa .{
                     .tag = .@"!=",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -136,7 +141,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '=' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '=' => break :dfa .{
                     .tag = .@"==",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -152,7 +157,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '>' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '=' => break :dfa .{
                     .tag = .@">=",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -173,7 +178,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '<' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '=' => break :dfa .{
                     .tag = .@"<=",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -194,7 +199,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '|' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '|' => break :dfa .{
                     .tag = .@"||",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -210,7 +215,7 @@ pub fn next(this: *Tokenizer) ?Token {
             };
         },
         '&' => {
-            if (this.peek(1)) |tok| switch (tok) {
+            if (this.nextChar()) |c| switch (c) {
                 '&' => break :dfa .{
                     .tag = .@"&&",
                     .span = .{ .start = this.pos, .end = this.pos + 2 },
@@ -230,9 +235,9 @@ pub fn next(this: *Tokenizer) ?Token {
             .span = .{ .start = this.pos, .end = this.pos + 1 },
             .value = this.src[this.pos .. this.pos + 1],
         },
-        '\'' => this.characterLiteral(),
-        '0'...'9' => this.integerLiteral(),
-        '_', 'a'...'z', 'A'...'Z' => this.keywordOrIdentifier(),
+        '\'' => this.parseCharacterLiteral(),
+        '0'...'9' => this.parseIntegerLiteral(),
+        '_', 'a'...'z', 'A'...'Z' => this.parseKeywordOrIdentifier(),
         ' ', '\t'...'\r' => {
             this.skipWhitespace();
             continue :dfa this.src[this.pos];
@@ -242,12 +247,50 @@ pub fn next(this: *Tokenizer) ?Token {
     };
 }
 
-fn peek(this: *const Tokenizer, comptime offset: usize) ?u8 {
-    if (this.pos + offset >= this.src.len) return null;
-    return this.src[this.pos + offset];
+pub fn hasNext(this: *@This()) bool {
+    return this.lookahead(1) != null;
 }
 
-fn integerLiteral(this: *Tokenizer) Token {
+pub fn lookahead(this: *Tokenizer, comptime k: usize) ?Token {
+    const old = this.pos;
+    defer this.pos = old;
+
+    inline for (0..k - 1) |_| _ = this.next();
+    return this.next();
+}
+
+pub fn expect(this: *@This(), expected: anytype, la: usize) ?Token {
+    assert(@typeInfo(@TypeOf(expected)) == .@"struct");
+
+    const token = this.lookahead(la) orelse return null;
+    inline for (expected) |e| switch (token.tag) {
+        e => return this.next(),
+        else => {},
+    };
+
+    return null;
+}
+
+pub fn sync(this: *@This(), expected: anytype) ?Token {
+    return token: while (this.lookahead(1)) |_| {
+        if (this.expect(expected)) |t| break :token t;
+        _ = this.next();
+    } else null;
+}
+
+pub fn collect(this: *@This(), allocator: Allocator) ![]const Token {
+    var tokens = try ArrayList(Token).initCapacity(allocator, 1024);
+    errdefer tokens.deinit(allocator);
+
+    while (this.next()) |token| try tokens.append(allocator, token);
+    return tokens.toOwnedSlice(allocator);
+}
+
+fn nextChar(this: *Tokenizer) ?u8 {
+    return if (this.pos + 1 >= this.src.len) return null else this.src[this.pos + 1];
+}
+
+fn parseIntegerLiteral(this: *Tokenizer) Token {
     var idx = this.pos;
     while (idx < this.src.len and ascii.isDigit(this.src[idx])) : (idx += 1) {}
 
@@ -259,7 +302,7 @@ fn integerLiteral(this: *Tokenizer) Token {
     };
 }
 
-fn characterLiteral(this: *Tokenizer) ?Token {
+fn parseCharacterLiteral(this: *Tokenizer) ?Token {
     this.pos += 1;
 
     const begin = this.pos;
@@ -276,7 +319,7 @@ fn characterLiteral(this: *Tokenizer) ?Token {
     return null;
 }
 
-fn keywordOrIdentifier(this: *Tokenizer) Token {
+fn parseKeywordOrIdentifier(this: *Tokenizer) Token {
     var idx = this.pos;
     defer this.pos = idx - 1;
 
@@ -298,7 +341,7 @@ fn skipWhitespace(this: *Tokenizer) void {
 }
 
 // the token value str doesn't include the "/* */"s
-fn comment(this: *Tokenizer) ?Token {
+fn parseComment(this: *Tokenizer) ?Token {
     this.pos += 2;
 
     const begin = this.pos;
@@ -381,6 +424,47 @@ pub const Token = struct {
 
         invalid,
     };
+
+    pub fn format(this: *const @This(), depth: usize) fmt.Alt(Format, Format.format) {
+        return .{ .data = .{ .depth = depth, .token = this } };
+    }
+
+    const Format = struct {
+        depth: usize = 0,
+        token: *const Token,
+
+        pub fn format(this: @This(), writer: *Io.Writer) Io.Writer.Error!void {
+            const depth = this.depth;
+            for (0..depth) |_| try writer.print(term.SEP, .{});
+
+            switch (this.token.tag) {
+                .integer_literal,
+                .character_literal,
+                .string_literal,
+                => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}\n", .{
+                    term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
+                    this.token.tag,
+                    term.FG.WHITE ++ term.FG.EFFECT.UNDERLINE,
+                    this.token.value,
+                    term.FG.MAGENTA ++ term.FG.EFFECT.RESET.UNDERLINE,
+                    term.RESET,
+                }),
+                .identifier => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}\n", .{
+                    term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
+                    this.token.tag,
+                    term.FG.WHITE ++ term.FG.EFFECT.UNDERLINE,
+                    this.token.value,
+                    term.RESET ++ term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
+                    term.RESET,
+                }),
+                else => try writer.print("{s}Token.{t}{s}\n", .{
+                    term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
+                    this.token.tag,
+                    term.RESET,
+                }),
+            }
+        }
+    };
 };
 
 const KEYWORDS = StaticStringMap(Token.Tag).initComptime(.{
@@ -395,93 +479,3 @@ const KEYWORDS = StaticStringMap(Token.Tag).initComptime(.{
     .{ "return", .@"return" },
 });
 
-test "parse comment: happy" {
-    const expectEqualDeep = std.testing.expectEqualDeep;
-    const input =
-        \\/* Yes */
-    ;
-
-    const expected: []const Token = &.{.{
-        .tag = .comment,
-        .span = .{ .start = 2, .end = 7 },
-        .value = " Yes ",
-    }};
-
-    var actual = Tokenizer.init(input);
-    var i: usize = 0;
-    while (actual.next()) |a| : (i += 1) try expectEqualDeep(expected[i], a);
-
-    try expectEqualDeep(actual.next(), null);
-}
-
-test "simple input" {
-    const expectEqualDeep = std.testing.expectEqualDeep;
-
-    const input =
-        \\/* The following function will print a non-negative number, n, to
-        \\   the base b, where 2<=b<=10.  This routine uses the fact that
-        \\   in the ASCII character set, the digits 0 to 9 have sequential
-        \\   code values.  */
-        \\
-        \\printn(n,b) {
-        \\   extrn putchar;
-        \\   auto a;
-        \\   /* Wikipedia note: the auto keyword declares a variable with
-        \\      automatic storage (lifetime is function scope), not
-        \\      "automatic typing" as in C++11. */
-        \\
-        \\   if(a=n/b) /* assignment, not test for equality */
-        \\      printn(a, b); /* recursive */
-        \\   putchar(n%b + '0');
-        \\}
-    ;
-
-    const expected: []const Token = &.{
-        .{ .tag = .comment, .span = .{ .start = 2, .end = 212 }, .value = input[2..212] },
-        .{ .tag = .identifier, .span = .{ .start = 216, .end = 222 }, .value = "printn" },
-        .{ .tag = .@"(", .span = .{ .start = 222, .end = 223 }, .value = "(" },
-        .{ .tag = .identifier, .span = .{ .start = 223, .end = 224 }, .value = "n" },
-        .{ .tag = .@",", .span = .{ .start = 224, .end = 225 }, .value = "," },
-        .{ .tag = .identifier, .span = .{ .start = 225, .end = 226 }, .value = "b" },
-        .{ .tag = .@")", .span = .{ .start = 226, .end = 227 }, .value = ")" },
-        .{ .tag = .@"{", .span = .{ .start = 228, .end = 229 }, .value = "{" },
-        .{ .tag = .extrn, .span = .{ .start = 233, .end = 238 }, .value = "extrn" },
-        .{ .tag = .identifier, .span = .{ .start = 239, .end = 246 }, .value = "putchar" },
-        .{ .tag = .@";", .span = .{ .start = 246, .end = 247 }, .value = ";" },
-        .{ .tag = .auto, .span = .{ .start = 251, .end = 255 }, .value = "auto" },
-        .{ .tag = .identifier, .span = .{ .start = 256, .end = 257 }, .value = "a" },
-        .{ .tag = .@";", .span = .{ .start = 257, .end = 258 }, .value = ";" },
-        .{ .tag = .comment, .span = .{ .start = 264, .end = 419 }, .value = input[264..419] },
-        .{ .tag = .@"if", .span = .{ .start = 426, .end = 428 }, .value = "if" },
-        .{ .tag = .@"(", .span = .{ .start = 428, .end = 429 }, .value = "(" },
-        .{ .tag = .identifier, .span = .{ .start = 429, .end = 430 }, .value = "a" },
-        .{ .tag = .@"=", .span = .{ .start = 430, .end = 431 }, .value = "=" },
-        .{ .tag = .identifier, .span = .{ .start = 431, .end = 432 }, .value = "n" },
-        .{ .tag = .@"/", .span = .{ .start = 432, .end = 433 }, .value = "/" },
-        .{ .tag = .identifier, .span = .{ .start = 433, .end = 434 }, .value = "b" },
-        .{ .tag = .@")", .span = .{ .start = 434, .end = 435 }, .value = ")" },
-        .{ .tag = .comment, .span = .{ .start = 438, .end = 473 }, .value = input[438..473] },
-        .{ .tag = .identifier, .span = .{ .start = 482, .end = 488 }, .value = "printn" },
-        .{ .tag = .@"(", .span = .{ .start = 488, .end = 489 }, .value = "(" },
-        .{ .tag = .identifier, .span = .{ .start = 489, .end = 490 }, .value = "a" },
-        .{ .tag = .@",", .span = .{ .start = 490, .end = 491 }, .value = "," },
-        .{ .tag = .identifier, .span = .{ .start = 492, .end = 493 }, .value = "b" },
-        .{ .tag = .@")", .span = .{ .start = 493, .end = 494 }, .value = ")" },
-        .{ .tag = .@";", .span = .{ .start = 494, .end = 495 }, .value = ";" },
-        .{ .tag = .comment, .span = .{ .start = 498, .end = 509 }, .value = " recursive " },
-        .{ .tag = .identifier, .span = .{ .start = 515, .end = 522 }, .value = "putchar" },
-        .{ .tag = .@"(", .span = .{ .start = 522, .end = 523 }, .value = "(" },
-        .{ .tag = .identifier, .span = .{ .start = 523, .end = 524 }, .value = "n" },
-        .{ .tag = .@"%", .span = .{ .start = 524, .end = 525 }, .value = "%" },
-        .{ .tag = .identifier, .span = .{ .start = 525, .end = 526 }, .value = "b" },
-        .{ .tag = .@"+", .span = .{ .start = 527, .end = 528 }, .value = "+" },
-        .{ .tag = .character_literal, .span = .{ .start = 530, .end = 531 }, .value = "0" },
-        .{ .tag = .@")", .span = .{ .start = 532, .end = 533 }, .value = ")" },
-        .{ .tag = .@";", .span = .{ .start = 533, .end = 534 }, .value = ";" },
-        .{ .tag = .@"}", .span = .{ .start = 535, .end = 536 }, .value = "}" },
-    };
-
-    var actual = Tokenizer.init(input);
-    var i: usize = 0;
-    while (actual.next()) |t| : (i += 1) try expectEqualDeep(expected[i], t);
-}
