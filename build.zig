@@ -20,88 +20,90 @@ pub fn build(b: *std.Build) !void {
     );
 
     // Modules and Deps
-    const libb_mod = b.addModule("libb", .{
-        .root_source_file = b.path("src/libb.zig"),
+    const lox_mod = b.addModule("lox", .{
+        .root_source_file = b.path("src/lox.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const bcompiler_mod = b.createModule(.{
-        .root_source_file = b.path("src/b.zig"),
+    const loxi_mod = b.createModule(.{
+        .root_source_file = b.path("src/loxi.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const libb_deps: []const Import = &.{
-        .{ .name = "config", .module = mod: {
+    const lox_deps: []const Import = &.{
+        .{ .name = "manifest", .module = mod: {
             const opts = b.addOptions();
             opts.addOption(SemanticVersion, "version", try SemanticVersion.parse(manifest.version));
             break :mod opts.createModule();
         } },
-        .{ .name = "libb", .module = libb_mod },
+        .{ .name = "lox", .module = lox_mod },
+        .{ .name = "util", .module = b.dependency("util", .{ .optimize = optimize, .target = target }).module("util") },
     };
-    const bcompiler_deps: []const Import = &.{
-        .{ .name = "libb", .module = libb_mod },
-        .{ .name = "b", .module = bcompiler_mod },
+    const loxi_deps: []const Import = &.{
+        .{ .name = "lox", .module = lox_mod },
+        .{ .name = "loxi", .module = loxi_mod },
+        .{ .name = "util", .module = b.dependency("util", .{ .optimize = optimize, .target = target }).module("util") },
     };
-    for (libb_deps) |dep| libb_mod.addImport(dep.name, dep.module);
-    for (bcompiler_deps) |dep| bcompiler_mod.addImport(dep.name, dep.module);
+    for (lox_deps) |dep| lox_mod.addImport(dep.name, dep.module);
+    for (loxi_deps) |dep| loxi_mod.addImport(dep.name, dep.module);
 
     // Targets
-    const libb = b.addLibrary(.{
-        .name = "b",
+    const lox = b.addLibrary(.{
+        .name = "lox",
         .linkage = .static,
-        .root_module = libb_mod,
+        .root_module = lox_mod,
         .use_llvm = true,
     });
-    const libb_check = b.addLibrary(.{ .name = "libb", .root_module = libb_mod });
-    const libb_tests = b.addTest(.{
-        .name = "libbtest",
+    const lox_check = b.addLibrary(.{ .name = "loxcheck", .root_module = lox_mod });
+    const lox_tests = b.addTest(.{
+        .name = "loxtest",
         .use_llvm = true,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("test/libb.zig"),
-            .imports = &.{.{ .name = "libb", .module = libb_mod }},
+            .root_source_file = b.path("test/lox.zig"),
+            .imports = &.{.{ .name = "lox", .module = lox_mod }},
             .target = target,
             .optimize = optimize,
         }),
     });
 
-    const bcompiler = b.addExecutable(.{
-        .name = "b",
+    const loxi = b.addExecutable(.{
+        .name = "loxi",
         .linkage = .static,
-        .root_module = bcompiler_mod,
+        .root_module = loxi_mod,
         .use_llvm = true,
     });
-    const bcompiler_check = b.addLibrary(.{ .name = "b", .root_module = bcompiler_mod });
-    const bcompiler_tests = b.addTest(.{
-        .name = "btest",
+    const loxi_check = b.addLibrary(.{ .name = "loxicheck", .root_module = loxi_mod });
+    const loxi_tests = b.addTest(.{
+        .name = "loxitest",
         .use_llvm = true,
         .root_module = b.createModule(.{
-            .root_source_file = b.path("test/b.zig"),
+            .root_source_file = b.path("test/loxi.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "b", .module = bcompiler_mod }},
+            .imports = &.{.{ .name = "lox", .module = loxi_mod }},
         }),
     });
 
     // Install
-    b.installArtifact(libb);
-    b.installArtifact(bcompiler);
-    b.installArtifact(libb_tests); // Useful for debugging
-    b.installArtifact(bcompiler_tests); // "
+    b.installArtifact(lox);
+    b.installArtifact(loxi);
+    b.installArtifact(lox_tests); // Useful for debugging
+    b.installArtifact(loxi_tests); // "
 
     // Run
-    const run_cmd = b.addRunArtifact(bcompiler);
+    const run_cmd = b.addRunArtifact(loxi);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
     // Test
-    const run_lib_unit_tests = b.addRunArtifact(libb_tests);
-    const run_b_unit_tests = b.addRunArtifact(bcompiler_tests);
+    const run_lox_unit_tests = b.addRunArtifact(lox_tests);
+    const run_loxi_unit_tests = b.addRunArtifact(loxi_tests);
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_b_unit_tests.step);
+    test_step.dependOn(&run_lox_unit_tests.step);
+    test_step.dependOn(&run_loxi_unit_tests.step);
 
     // Clean
     const clean_step = b.step("clean", "Remove build artifacts");
@@ -111,6 +113,6 @@ pub fn build(b: *std.Build) !void {
 
     // Check Step
     const check_step = b.step("check", "Check that the build artifacts are up-to-date");
-    check_step.dependOn(&bcompiler_check.step);
-    check_step.dependOn(&libb_check.step);
+    check_step.dependOn(&loxi_check.step);
+    check_step.dependOn(&lox_check.step);
 }
