@@ -17,7 +17,7 @@ const term = util.term;
 const getopt = util.getopt;
 const err = util.err;
 
-const Interpreter = struct {
+const Repl = struct {
     prompt: []const u8 = term.FG.GREEN ++ "lox> " ++ term.RESET,
 
     fn reportErrors(_: *const @This(), errors: []const Parser.Error) !void {
@@ -62,7 +62,7 @@ pub fn main() !void {
     defer threaded.deinit();
     const io = threaded.io();
 
-    var interpreter: Interpreter = .{};
+    var interpreter: Repl = .{};
 
     var opts = getopt.init("i:hv");
     while (opts.next() catch return opts.usage()) |opt| switch (opt) {

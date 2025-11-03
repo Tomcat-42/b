@@ -218,13 +218,13 @@ pub const Location = struct {
 
 pub const Token = struct {
     tag: Tag,
-    span: Span,
+    span: Span = .{},
     value: []const u8,
 
     // [start, end)
     pub const Span = struct {
-        start: usize,
-        end: usize,
+        start: usize = 0,
+        end: usize = 0,
     };
 
     pub const Tag = enum {
@@ -285,7 +285,7 @@ pub const Token = struct {
             switch (this.token.tag) {
                 .number,
                 .string,
-                => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}", .{
+                => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}\n", .{
                     term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     this.token.tag,
                     term.FG.WHITE ++ term.FG.EFFECT.UNDERLINE,
@@ -293,7 +293,7 @@ pub const Token = struct {
                     term.FG.MAGENTA ++ term.FG.EFFECT.RESET.UNDERLINE,
                     term.RESET,
                 }),
-                .identifier => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}", .{
+                .identifier => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}\n", .{
                     term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     this.token.tag,
                     term.FG.WHITE ++ term.FG.EFFECT.UNDERLINE,
@@ -301,7 +301,7 @@ pub const Token = struct {
                     term.RESET ++ term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     term.RESET,
                 }),
-                .comment => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}", .{
+                .comment => try writer.print("{s}Token{{.{t} = {s}{s}{s}}}{s}\n", .{
                     term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     this.token.tag,
                     term.FG.GREEN ++ term.FG.EFFECT.UNDERLINE,
@@ -309,7 +309,7 @@ pub const Token = struct {
                     term.RESET ++ term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     term.RESET,
                 }),
-                else => try writer.print("{s}Token.{t}{s}", .{
+                else => try writer.print("{s}Token.{t}{s}\n", .{
                     term.FG.MAGENTA ++ term.FG.EFFECT.ITALIC,
                     this.token.tag,
                     term.RESET,

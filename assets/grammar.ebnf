@@ -1,0 +1,7 @@
+Expr        = LiteralExpr | UnaryExpr | BinExp | GroupExp ;
+LiteralExpr = "<NUMBER>" | "<STRING>" | "true" | "false" | "nil" ;
+GroupExpr   = "(" , Expr , ")" ;
+UnaryExpr   = UnaryOp , Expression ;
+UnaryOp     = "-" | "!" ;
+BinExpr     = Expr , BinOp , Expr ;
+BinOp       = "==" | "!=" | "<" | "<=" | ">" | ">=" | "+"  | "-"  | "*" | "/" ;
